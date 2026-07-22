@@ -1,0 +1,7 @@
+monitor_state.json
+monitor_state.json.tmp
+monitor_state.json.broken
+config.json
+__pycache__/
+.pytest_cache/
+.tmp_priceai_ref/
