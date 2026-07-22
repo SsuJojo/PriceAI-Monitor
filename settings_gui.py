@@ -22,6 +22,7 @@ CONFIG_PATH = APP_DIR / "config.json"
 EXAMPLE_CONFIG_PATH = APP_DIR / "config.example.json"
 MONITOR_PATH = APP_DIR / "price_monitor.py"
 STATE_PATH = APP_DIR / "monitor_state.json"
+PAUSE_FLAG = APP_DIR / "monitor_pause.flag"
 MIN_INTERVAL_SECONDS = 60
 DEFAULT_PYTHON = r"E:\DevTools\Python\envs\default-py312\Scripts\python.exe"
 
@@ -204,9 +205,10 @@ class SettingsApp:
         self.save_button = ttk.Button(buttons, text="保存设置", command=self.save_settings)
         self.test_button = ttk.Button(buttons, text="测试扫描", command=self.test_scan)
         self.start_button = ttk.Button(buttons, text="保存并启动监控", command=self.start_monitor)
+        self.pause_button = ttk.Button(buttons, text="暂停", command=self.toggle_pause, state="disabled")
         self.stop_button = ttk.Button(buttons, text="停止监控", command=self.stop_monitor, state="disabled")
         self.clear_button = ttk.Button(buttons, text="清空日志", command=self.clear_log)
-        for button in (self.save_button, self.test_button, self.start_button, self.stop_button, self.clear_button):
+        for button in (self.save_button, self.test_button, self.start_button, self.pause_button, self.stop_button, self.clear_button):
             button.pack(side="left", padx=(0, 8))
 
         # ── 右侧：日志区 ──
@@ -362,9 +364,15 @@ class SettingsApp:
             return
         if not self.save_settings(show_success=False):
             return
-        # 每次启动监控都视为全新会话，清空上次的去重状态
+        # 每次启动监控都视为全新会话，清空上次的去重状态和暂停标志
         try:
             STATE_PATH.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError:
+            pass
+        try:
+            PAUSE_FLAG.unlink()
         except FileNotFoundError:
             pass
         except OSError:
@@ -398,9 +406,31 @@ class SettingsApp:
         self.status.set("监控运行中")
         self.start_button.configure(state="disabled")
         self.test_button.configure(state="disabled")
+        self.pause_button.configure(text="暂停", state="normal")
         self.stop_button.configure(state="normal")
         self._append_log("\n--- 监控已启动 ---\n")
         threading.Thread(target=self._monitor_reader, args=(self.monitor_process,), daemon=True).start()
+
+    def toggle_pause(self) -> None:
+        if self.monitor_process is None:
+            return
+        if PAUSE_FLAG.exists():
+            # 当前是暂停状态，点击则继续
+            try:
+                PAUSE_FLAG.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError:
+                pass
+            self.pause_button.configure(text="暂停")
+            self.status.set("监控运行中")
+            self._append_log("--- 监控已继续 ---\n")
+        else:
+            # 当前是运行状态，点击则暂停
+            PAUSE_FLAG.touch()
+            self.pause_button.configure(text="继续")
+            self.status.set("已暂停")
+            self._append_log("--- 监控已暂停 ---\n")
 
     def _monitor_reader(self, process: subprocess.Popen[str]) -> None:
         if process.stdout is not None:
@@ -424,7 +454,12 @@ class SettingsApp:
             while True:
                 kind, value = self.events.get_nowait()
                 if kind == "log":
-                    self._append_log(str(value))
+                    line = str(value)
+                    self._append_log(line)
+                    # 检测自动下单后的自动暂停
+                    if "监控已自动暂停" in line:
+                        self.pause_button.configure(text="继续")
+                        self.status.set("已暂停（下单后）")
                 elif kind == "test_done":
                     return_code, output = value
                     self._append_log(output or "测试扫描没有输出。\n")
@@ -437,6 +472,7 @@ class SettingsApp:
                     self.monitor_process = None
                     self.start_button.configure(state="normal")
                     self.test_button.configure(state="normal")
+                    self.pause_button.configure(text="暂停", state="disabled")
                     self.stop_button.configure(state="disabled")
                     self.status.set("已停止")
         except queue.Empty:

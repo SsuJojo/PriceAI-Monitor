@@ -24,6 +24,7 @@ from auto_order import auto_order, is_ldxp_url
 
 DEFAULT_CONFIG_PATH = Path(__file__).with_name("config.json")
 DEFAULT_STATE_PATH = Path(__file__).with_name("monitor_state.json")
+PAUSE_FLAG = Path(__file__).with_name("monitor_pause.flag")
 AVAILABLE_STATUSES = {"in_stock", "low_stock"}
 UNAVAILABLE_EFFECTIVE_STATUSES = {"unavailable", "stale", "failed"}
 USER_AGENT = "PriceAI-Offer-Monitor/1.0 (+personal price alert)"
@@ -602,6 +603,8 @@ def try_auto_order(offers: list[Offer], config: dict[str, Any]) -> None:
                 flush=True,
             )
             print(f"[自动下单] 支付链接: {result.get('payurl', '')}", flush=True)
+            print("[自动下单] 监控已自动暂停，请付款后点击「继续」按钮恢复监控", flush=True)
+            PAUSE_FLAG.touch()
         else:
             print(f"[自动下单] 失败: {result.get('message', '未知错误')}", flush=True)
         # 只处理第一个可下单的 ldxp 报价
@@ -656,6 +659,9 @@ def run_watch(config: dict[str, Any], state_path: Path) -> None:
     print(f"PriceAI 监控已启动，每 {interval} 秒检查一次。按 Ctrl+C 停止。", flush=True)
     consecutive_errors = 0
     while True:
+        # 暂停检查：标志文件存在时循环等待，直到被删除
+        while PAUSE_FLAG.exists():
+            time.sleep(0.5)
         started = time.monotonic()
         try:
             check_once(config, state_path)

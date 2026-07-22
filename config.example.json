@@ -1,0 +1,29 @@
+{
+  "price_radar_latest_url": "https://data.priceai.cc/latest.json",
+  "product_id": "chatgpt-plus",
+  "preset_id": "account_verified",
+  "max_price": 12.0,
+  "min_price": 0.0,
+  "min_stock": 1,
+  "fresh_within_minutes": 30,
+  "required_keywords": [],
+  "excluded_keywords": [],
+  "check_interval_seconds": 60,
+  "request_timeout_seconds": 15,
+  "request_retries": 3,
+  "notification_max_items": 5,
+  "auto_order": {
+    "enabled": false,
+    "contact": "",
+    "query_password": "",
+    "preferred_channel": "alipay"
+  },
+  "notifications": {
+    "windows_toast": true,
+    "webhook_url": "",
+    "telegram": {
+      "bot_token": "",
+      "chat_id": ""
+    }
+  }
+}
