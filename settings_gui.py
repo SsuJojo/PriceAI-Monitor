@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """Tkinter settings and launcher UI for the PriceAI monitor."""
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ import subprocess
 import sys
 import threading
 import tkinter as tk
+import webbrowser
 from pathlib import Path
 from tkinter import messagebox, ttk
 from typing import Any
@@ -22,6 +23,7 @@ EXAMPLE_CONFIG_PATH = APP_DIR / "config.example.json"
 MONITOR_PATH = APP_DIR / "price_monitor.py"
 STATE_PATH = APP_DIR / "monitor_state.json"
 MIN_INTERVAL_SECONDS = 60
+DEFAULT_PYTHON = r"E:\DevTools\Python\envs\default-py312\Scripts\python.exe"
 
 
 class SettingsError(ValueError):
@@ -48,7 +50,6 @@ def validate_settings_values(values: dict[str, str]) -> dict[str, int | float]:
         interval = int(values["check_interval_seconds"])
         min_stock = int(values["min_stock"])
         freshness = int(values["fresh_within_minutes"])
-        renotify = float(values["renotify_hours"])
     except (KeyError, TypeError, ValueError) as exc:
         raise SettingsError("价格和时间设置必须填写有效数字。") from exc
 
@@ -66,8 +67,6 @@ def validate_settings_values(values: dict[str, str]) -> dict[str, int | float]:
         raise SettingsError("最低库存不能小于 0。")
     if freshness < 0:
         raise SettingsError("报价有效时间不能小于 0。")
-    if renotify < 0:
-        raise SettingsError("重复提醒间隔不能小于 0。")
 
     return {
         "max_price": max_price,
@@ -75,7 +74,6 @@ def validate_settings_values(values: dict[str, str]) -> dict[str, int | float]:
         "check_interval_seconds": interval,
         "min_stock": min_stock,
         "fresh_within_minutes": freshness,
-        "renotify_hours": renotify,
     }
 
 
@@ -116,7 +114,6 @@ class SettingsApp:
         self.interval = tk.StringVar(value=str(self.config.get("check_interval_seconds", 60)))
         self.min_stock = tk.StringVar(value=str(self.config.get("min_stock", 1)))
         self.freshness = tk.StringVar(value=str(self.config.get("fresh_within_minutes", 120)))
-        self.renotify = tk.StringVar(value=str(self.config.get("renotify_hours", 24)))
         notifications = self.config.get("notifications")
         if not isinstance(notifications, dict):
             notifications = {}
@@ -124,6 +121,7 @@ class SettingsApp:
         self.status = tk.StringVar(value="未启动")
 
         self._placeholders: dict[tk.Text, str] = {}
+        self._link_counter = 0
         self._build_ui()
         self._set_keywords()
         self.root.after(100, self._drain_events)
@@ -155,7 +153,6 @@ class SettingsApp:
         self._entry_row(rules, 1, "最低价格（排除异常低价）", self.min_price, "元", 0)
         self._entry_row(rules, 1, "最低库存", self.min_stock, "个", 3)
         self._entry_row(rules, 2, "报价有效时间", self.freshness, "分钟；0 为不限", 0)
-        self._entry_row(rules, 2, "重复提醒间隔", self.renotify, "小时；0 为不重复", 3)
 
         keywords = ttk.LabelFrame(outer, text="关键词过滤（一行一个，也可用逗号分隔）", padding=10)
         keywords.pack(fill="both", pady=(0, 10))
@@ -253,7 +250,6 @@ class SettingsApp:
             "check_interval_seconds": self.interval.get().strip(),
             "min_stock": self.min_stock.get().strip(),
             "fresh_within_minutes": self.freshness.get().strip(),
-            "renotify_hours": self.renotify.get().strip(),
         }
 
     def save_settings(self, *, show_success: bool = True) -> bool:
@@ -298,7 +294,7 @@ class SettingsApp:
 
     def _test_worker(self) -> None:
         command = [
-            sys.executable,
+            self._python_executable(),
             str(MONITOR_PATH),
             "--config",
             str(CONFIG_PATH),
@@ -330,8 +326,15 @@ class SettingsApp:
             return
         if not self.save_settings(show_success=False):
             return
+        # 每次启动监控都视为全新会话，清空上次的去重状态
+        try:
+            STATE_PATH.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError:
+            pass
         command = [
-            sys.executable,
+            self._python_executable(),
             str(MONITOR_PATH),
             "--config",
             str(CONFIG_PATH),
@@ -406,7 +409,24 @@ class SettingsApp:
 
     def _append_log(self, text: str) -> None:
         self.log.configure(state="normal")
-        self.log.insert("end", text)
+        pos = 0
+        for match in re.finditer(r"https?://\S+", text):
+            if match.start() > pos:
+                self.log.insert("end", text[pos:match.start()])
+            url = match.group(0)
+            start = self.log.index("end-1c")
+            self.log.insert("end", url)
+            end = self.log.index("end-1c")
+            tag = f"link_{self._link_counter}"
+            self._link_counter += 1
+            self.log.tag_add(tag, start, end)
+            self.log.tag_configure(tag, foreground="#2563eb", underline=True)
+            self.log.tag_bind(tag, "<Button-1>", lambda e, u=url: webbrowser.open(u))
+            self.log.tag_bind(tag, "<Enter>", lambda e: self.log.configure(cursor="hand2"))
+            self.log.tag_bind(tag, "<Leave>", lambda e: self.log.configure(cursor=""))
+            pos = match.end()
+        if pos < len(text):
+            self.log.insert("end", text[pos:])
         self.log.see("end")
         self.log.configure(state="disabled")
 
@@ -418,6 +438,12 @@ class SettingsApp:
     @staticmethod
     def _creation_flags() -> int:
         return int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) if os.name == "nt" else 0
+
+    @staticmethod
+    def _python_executable() -> str:
+        if os.path.exists(DEFAULT_PYTHON):
+            return DEFAULT_PYTHON
+        return sys.executable
 
     @staticmethod
     def _child_env() -> dict[str, str]:

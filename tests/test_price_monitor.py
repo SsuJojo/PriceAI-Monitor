@@ -110,20 +110,39 @@ class MonitorTests(unittest.TestCase):
     def test_notification_dedupe_and_price_drop(self):
         offer = make_offer()
         state = {
-            "notified": {
-                offer.id: {"price": 9.81, "notified_at_epoch": 1000}
+            "last_offers": {
+                offer.id: {"price": 9.81, "stock_count": 15}
             }
         }
-        config = {"renotify_hours": 24}
-        self.assertEqual(notification_candidates([offer], state, config, 1100), [])
+        # Same price, same stock -> deduplicated
+        self.assertEqual(notification_candidates([offer], state), [])
+        # Price dropped -> notify
         cheaper = make_offer(price=9.5)
-        self.assertEqual(notification_candidates([cheaper], state, config, 1100), [cheaper])
-        self.assertEqual(notification_candidates([offer], state, config, 1000 + 86400), [offer])
+        self.assertEqual(notification_candidates([cheaper], state), [cheaper])
+
+    def test_notification_stock_increase(self):
+        offer = make_offer()
+        state = {
+            "last_offers": {
+                offer.id: {"price": 9.81, "stock_count": 10}
+            }
+        }
+        # Same price, stock increased -> notify
+        more_stock = make_offer(stockCount=20)
+        self.assertEqual(notification_candidates([more_stock], state), [more_stock])
+        # Same price, stock decreased -> deduplicated
+        less_stock = make_offer(stockCount=5)
+        self.assertEqual(notification_candidates([less_stock], state), [])
+
+    def test_notification_new_id(self):
+        state = {"last_offers": {}}
+        offer = make_offer()
+        self.assertEqual(notification_candidates([offer], state), [offer])
 
     def test_state_round_trip(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "state.json"
-            state = {"notified": {"one": {"price": 8.5}}}
+            state = {"last_offers": {"one": {"price": 8.5, "stock_count": 3}}}
             save_state(path, state)
             self.assertEqual(load_state(path), state)
 

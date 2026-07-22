@@ -1,6 +1,6 @@
 # PriceAI 合适价格监控
 
-这个程序通过 PriceAI Price Radar V1 官方公开快照，定时检查 ChatGPT Plus「已接码成品号」Top 5 报价。它只对**有货且满足全部规则**的商品提醒，并对相同报价去重；价格进一步下降或达到重新提醒间隔时才会再次提醒。
+这个程序通过 PriceAI Price Radar V1 官方公开快照，定时检查 ChatGPT Plus「已接码成品号」Top 5 报价。它只对**有货且满足全部规则**的商品提醒，并与上次扫描对比去重；出现新报价或已有报价降价/库存增加时才会再次提醒。
 
 ## 当前默认规则
 
@@ -80,9 +80,8 @@ Unregister-ScheduledTask -TaskName 'PriceAI-Price-Monitor' -Confirm:$false
 | `price_radar_latest_url` | Price Radar 快照指针地址，通常不需要修改 |
 | `product_id` | 标准商品，当前为 `chatgpt-plus` |
 | `preset_id` | 快速筛选预设，当前为 `account_verified` |
-| `renotify_hours` | 同一报价多久后允许再次提醒；降价会立即重发 |
 
-程序先读取 `https://data.priceai.cc/latest.json`。只有 `snapshot_id` 变化时才下载新的不可变快照，并把 ETag、快照编号和当前 Top 5 保存在 `monitor_state.json`；网络异常时会继续使用最后一次有效缓存。Price Radar V1 每个预设最多提供 5 条报价，关键词和价格条件均在本地应用。
+程序先读取 `https://data.priceai.cc/latest.json`。只有 `snapshot_id` 变化时才下载新的不可变快照，并把 ETag、快照编号和当前匹配结果保存在 `monitor_state.json`；网络异常时会继续使用最后一次有效缓存。Price Radar V1 每个预设最多提供 5 条报价，关键词和价格条件均在本地应用。每次启动监控时清空去重状态，后续扫描与上次结果对比：新报价或已有报价降价/库存增加时才提醒。
 
 ## 远程提醒
 

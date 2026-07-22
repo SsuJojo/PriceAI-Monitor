@@ -380,7 +380,7 @@ def sort_offers(offers: Iterable[Offer]) -> list[Offer]:
 
 def load_state(path: Path) -> dict[str, Any]:
     if not path.exists():
-        return {"notified": {}, "last_success_at": None}
+        return {"last_offers": {}}
     try:
         value = load_json(path)
     except MonitorError:
@@ -389,9 +389,9 @@ def load_state(path: Path) -> dict[str, Any]:
             path.replace(backup)
         except OSError:
             pass
-        return {"notified": {}, "last_success_at": None}
-    if not isinstance(value.get("notified"), dict):
-        value["notified"] = {}
+        return {"last_offers": {}}
+    if not isinstance(value.get("last_offers"), dict):
+        value["last_offers"] = {}
     return value
 
 
@@ -403,21 +403,27 @@ def save_state(path: Path, state: dict[str, Any]) -> None:
 
 
 def notification_candidates(
-    offers: list[Offer], state: dict[str, Any], config: dict[str, Any], now: float
+    offers: list[Offer], state: dict[str, Any]
 ) -> list[Offer]:
-    notified = state.get("notified", {})
-    renotify_hours = float(config.get("renotify_hours", 24))
+    """与上次扫描对比，返回需要通知的报价（新 id 或价格降低或库存上升）。"""
+    last_offers = state.get("last_offers", {})
+    if not isinstance(last_offers, dict):
+        last_offers = {}
     candidates: list[Offer] = []
     for offer in offers:
-        previous = notified.get(offer.id)
+        previous = last_offers.get(offer.id)
         if not isinstance(previous, dict):
             candidates.append(offer)
             continue
         previous_price = previous.get("price")
-        previous_at = previous.get("notified_at_epoch", 0)
         price_dropped = isinstance(previous_price, (int, float)) and offer.price < float(previous_price)
-        expired = renotify_hours > 0 and now - float(previous_at or 0) >= renotify_hours * 3600
-        if price_dropped or expired:
+        previous_stock = previous.get("stock_count")
+        stock_increased = (
+            isinstance(previous_stock, (int, float))
+            and isinstance(offer.stock_count, int)
+            and offer.stock_count > int(previous_stock)
+        )
+        if price_dropped or stock_increased:
             candidates.append(offer)
     return candidates
 
@@ -502,18 +508,23 @@ def send_windows_toast(title: str, body: str) -> None:
     )
     script = (
         "$ErrorActionPreference='Stop';"
+        "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null;"
+        "[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null;"
         "$xml=New-Object Windows.Data.Xml.Dom.XmlDocument;"
         f"$xml.LoadXml('{toast_xml.replace(chr(39), chr(39) * 2)}');"
         "$toast=[Windows.UI.Notifications.ToastNotification]::new($xml);"
-        "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('PriceAI Monitor').Show($toast)"
+        "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe').Show($toast)"
     )
-    subprocess.run(
+    result = subprocess.run(
         ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
         timeout=10,
         check=False,
+        creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) if os.name == "nt" else 0,
     )
+    if result.returncode != 0:
+        raise OSError(result.stderr.strip() or f"PowerShell exited with code {result.returncode}")
 
 
 def notify(offers: list[Offer], config: dict[str, Any]) -> None:
@@ -564,40 +575,34 @@ def check_once(
     offers, payload, next_radar_cache = fetch_offers(config, radar_cache)
     state["price_radar"] = next_radar_cache
     matched = sort_offers(offer for offer in offers if matches_config(offer, config))
-    now = time.time()
     generated_at = payload.get("generatedAt") or "未知"
-    print(
-        f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
-        f"接口返回 {len(offers)} 条，匹配 {len(matched)} 条",
-        flush=True,
-    )
 
     if dry_run:
+        print(
+            f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
+            f"接口返回 {len(offers)} 条，匹配 {len(matched)} 条",
+            flush=True,
+        )
         for offer in matched:
             print(f"- {format_offer_line(offer)}", flush=True)
         return len(offers), len(matched)
 
-    candidates = notification_candidates(matched, state, config, now)
+    candidates = notification_candidates(matched, state)
+    dedup_count = len(matched) - len(candidates)
+    print(
+        f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
+        f"接口返回 {len(offers)} 条，匹配 {len(matched)} 条，去重 {dedup_count} 条",
+        flush=True,
+    )
+
     if candidates:
         notify(candidates, config)
-        notified = state.setdefault("notified", {})
-        for offer in candidates:
-            notified[offer.id] = {
-                "price": offer.price,
-                "fingerprint": offer.fingerprint,
-                "notified_at": datetime.now(timezone.utc).isoformat(),
-                "notified_at_epoch": now,
-                "url": offer.url,
-            }
 
-    active_ids = {offer.id for offer in matched}
-    notified = state.setdefault("notified", {})
-    retention_days = max(1, int(config.get("state_retention_days", 30)))
-    cutoff = now - retention_days * 86400
-    for offer_id in list(notified):
-        item = notified.get(offer_id, {})
-        if offer_id not in active_ids and float(item.get("notified_at_epoch", 0) or 0) < cutoff:
-            del notified[offer_id]
+    # 用本次匹配结果覆盖上次记录，下次扫描时用于对比
+    state["last_offers"] = {
+        offer.id: {"price": offer.price, "stock_count": offer.stock_count}
+        for offer in matched
+    }
     state["last_success_at"] = datetime.now(timezone.utc).isoformat()
     state["last_generated_at"] = generated_at
     save_state(state_path, state)

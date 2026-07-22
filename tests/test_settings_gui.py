@@ -10,7 +10,6 @@ def valid_values(**overrides):
         "check_interval_seconds": "120",
         "min_stock": "1",
         "fresh_within_minutes": "120",
-        "renotify_hours": "24",
     }
     values.update(overrides)
     return values
