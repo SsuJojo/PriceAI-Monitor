@@ -100,8 +100,8 @@ class SettingsApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("PriceAI 账号价格监控")
-        self.root.geometry("820x760")
-        self.root.minsize(720, 650)
+        self.root.geometry("1430x680")
+        self.root.minsize(900, 600)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
         self.config = load_config_file()
@@ -118,6 +118,12 @@ class SettingsApp:
         if not isinstance(notifications, dict):
             notifications = {}
         self.windows_toast = tk.BooleanVar(value=bool(notifications.get("windows_toast", True)))
+        auto_order_cfg = self.config.get("auto_order")
+        if not isinstance(auto_order_cfg, dict):
+            auto_order_cfg = {}
+        self.auto_order_enabled = tk.BooleanVar(value=bool(auto_order_cfg.get("enabled", False)))
+        self.auto_order_contact = tk.StringVar(value=str(auto_order_cfg.get("contact", "")))
+        self.auto_order_password = tk.StringVar(value=str(auto_order_cfg.get("query_password", "")))
         self.status = tk.StringVar(value="未启动")
 
         self._placeholders: dict[tk.Text, str] = {}
@@ -130,22 +136,30 @@ class SettingsApp:
         outer = ttk.Frame(self.root, padding=14)
         outer.pack(fill="both", expand=True)
 
-        ttk.Label(outer, text="PriceAI 账号价格监控", font=("Microsoft YaHei UI", 16, "bold")).pack(anchor="w")
-        ttk.Label(
-            outer,
-            text="官方 Price Radar：ChatGPT Plus 试用订阅 → 已接码成品号 → Top 5",
-            foreground="#555555",
-        ).pack(anchor="w", pady=(3, 10))
+        # 左右分栏：左侧设置，右侧日志
+        left_frame = ttk.Frame(outer, width=600)
+        left_frame.pack(side="left", fill="y", expand=False)
+        left_frame.pack_propagate(False)
+        right_frame = ttk.Frame(outer)
+        right_frame.pack(side="left", fill="both", expand=True, padx=(10, 0))
 
-        target = ttk.LabelFrame(outer, text="固定监控目标", padding=10)
-        target.pack(fill="x", pady=(0, 10))
+        # ── 左侧：设置区 ──
+        ttk.Label(left_frame, text="PriceAI 账号价格监控", font=("Microsoft YaHei UI", 14, "bold")).pack(anchor="w")
+        ttk.Label(
+            left_frame,
+            text="官方 Price Radar：ChatGPT Plus 试用订阅 -> 已接码成品号 -> Top 5",
+            foreground="#555555",
+        ).pack(anchor="w", pady=(3, 8))
+
+        target = ttk.LabelFrame(left_frame, text="固定监控目标", padding=10)
+        target.pack(fill="x", pady=(0, 8))
         ttk.Label(target, text="商品").grid(row=0, column=0, sticky="w", padx=(0, 10))
         ttk.Label(target, text="ChatGPT Plus 试用订阅（chatgpt-plus）").grid(row=0, column=1, sticky="w")
         ttk.Label(target, text="分类").grid(row=1, column=0, sticky="w", padx=(0, 10), pady=(5, 0))
         ttk.Label(target, text="已接码成品号（account_verified）").grid(row=1, column=1, sticky="w", pady=(5, 0))
 
-        rules = ttk.LabelFrame(outer, text="监控条件", padding=10)
-        rules.pack(fill="x", pady=(0, 10))
+        rules = ttk.LabelFrame(left_frame, text="监控条件", padding=10)
+        rules.pack(fill="x", pady=(0, 8))
         rules.columnconfigure(1, weight=1)
         rules.columnconfigure(4, weight=1)
         self._entry_row(rules, 0, "最高监控价格（报价 ≤ 此值）", self.max_price, "元", 0)
@@ -154,8 +168,8 @@ class SettingsApp:
         self._entry_row(rules, 1, "最低库存", self.min_stock, "个", 3)
         self._entry_row(rules, 2, "报价有效时间", self.freshness, "分钟；0 为不限", 0)
 
-        keywords = ttk.LabelFrame(outer, text="关键词过滤（一行一个，也可用逗号分隔）", padding=10)
-        keywords.pack(fill="both", pady=(0, 10))
+        keywords = ttk.LabelFrame(left_frame, text="关键词过滤（一行一个，也可用逗号分隔）", padding=10)
+        keywords.pack(fill="both", pady=(0, 8))
         keywords.columnconfigure(0, weight=1)
         keywords.columnconfigure(1, weight=1)
         ttk.Label(keywords, text="包含").grid(row=0, column=0, sticky="w")
@@ -165,12 +179,27 @@ class SettingsApp:
         self.required_text.grid(row=1, column=0, sticky="nsew", pady=(4, 0))
         self.excluded_text.grid(row=1, column=1, sticky="nsew", padx=(10, 0), pady=(4, 0))
 
-        options = ttk.Frame(outer)
+        options = ttk.Frame(left_frame)
         options.pack(fill="x", pady=(0, 8))
         ttk.Checkbutton(options, text="启用 Windows 桌面通知", variable=self.windows_toast).pack(side="left")
         ttk.Label(options, textvariable=self.status, foreground="#245c3c").pack(side="right")
 
-        buttons = ttk.Frame(outer)
+        auto_frame = ttk.LabelFrame(left_frame, text="自动下单（链动小铺）", padding=10)
+        auto_frame.pack(fill="x", pady=(0, 8))
+        auto_frame.columnconfigure(1, weight=1)
+        ttk.Checkbutton(auto_frame, text="启用自动下单", variable=self.auto_order_enabled).grid(
+            row=0, column=0, columnspan=2, sticky="w"
+        )
+        ttk.Label(auto_frame, text="联系方式").grid(row=1, column=0, sticky="w", padx=(0, 10), pady=(5, 0))
+        ttk.Entry(auto_frame, textvariable=self.auto_order_contact).grid(
+            row=1, column=1, sticky="ew", pady=(5, 0)
+        )
+        ttk.Label(auto_frame, text="安全密码").grid(row=2, column=0, sticky="w", padx=(0, 10), pady=(5, 0))
+        ttk.Entry(auto_frame, textvariable=self.auto_order_password, show="*").grid(
+            row=2, column=1, sticky="ew", pady=(5, 0)
+        )
+
+        buttons = ttk.Frame(left_frame)
         buttons.pack(fill="x", pady=(0, 10))
         self.save_button = ttk.Button(buttons, text="保存设置", command=self.save_settings)
         self.test_button = ttk.Button(buttons, text="测试扫描", command=self.test_scan)
@@ -180,7 +209,8 @@ class SettingsApp:
         for button in (self.save_button, self.test_button, self.start_button, self.stop_button, self.clear_button):
             button.pack(side="left", padx=(0, 8))
 
-        log_frame = ttk.LabelFrame(outer, text="运行日志", padding=6)
+        # ── 右侧：日志区 ──
+        log_frame = ttk.LabelFrame(right_frame, text="运行日志", padding=6)
         log_frame.pack(fill="both", expand=True)
         log_frame.columnconfigure(0, weight=1)
         log_frame.rowconfigure(0, weight=1)
@@ -269,6 +299,12 @@ class SettingsApp:
                 notifications = dict(notifications)
             notifications["windows_toast"] = self.windows_toast.get()
             updated["notifications"] = notifications
+            updated["auto_order"] = {
+                "enabled": self.auto_order_enabled.get(),
+                "contact": self.auto_order_contact.get().strip(),
+                "query_password": self.auto_order_password.get().strip(),
+                "preferred_channel": "alipay",
+            }
             save_config_file(updated)
             self.config = updated
         except (OSError, SettingsError) as exc:

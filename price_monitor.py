@@ -19,6 +19,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+from auto_order import auto_order, is_ldxp_url
+
 
 DEFAULT_CONFIG_PATH = Path(__file__).with_name("config.json")
 DEFAULT_STATE_PATH = Path(__file__).with_name("monitor_state.json")
@@ -530,6 +532,10 @@ def send_windows_toast(title: str, body: str) -> None:
 def notify(offers: list[Offer], config: dict[str, Any]) -> None:
     title, body = build_notification(offers, config)
     print(f"\n{'=' * 72}\n{title}\n{'-' * 72}\n{body}\n{'=' * 72}", flush=True)
+
+    # 自动下单优先执行，抢在所有通知之前
+    try_auto_order(offers, config)
+
     settings = config.get("notifications") if isinstance(config.get("notifications"), dict) else {}
     errors: list[str] = []
 
@@ -565,6 +571,42 @@ def notify(offers: list[Offer], config: dict[str, Any]) -> None:
 
     for error in errors:
         print(f"[提醒通道警告] {error}", file=sys.stderr, flush=True)
+
+
+def try_auto_order(offers: list[Offer], config: dict[str, Any]) -> None:
+    """对匹配的链动小铺报价执行自动下单"""
+    order_cfg = config.get("auto_order")
+    if not isinstance(order_cfg, dict) or not order_cfg.get("enabled"):
+        return
+
+    contact = str(order_cfg.get("contact") or "").strip()
+    if not contact:
+        return
+
+    query_password = str(order_cfg.get("query_password") or "").strip()
+    preferred_channel = str(order_cfg.get("preferred_channel") or "alipay").strip()
+
+    for offer in offers:
+        if not is_ldxp_url(offer.url):
+            continue
+        print(f"[自动下单] 开始处理: {offer.title} | {offer.url}", flush=True)
+        result = auto_order(
+            offer.url,
+            contact=contact,
+            query_password=query_password,
+            preferred_channel=preferred_channel,
+        )
+        if result.get("success"):
+            print(
+                f"[自动下单] 成功: {result['message']} | 支付链接已打开",
+                flush=True,
+            )
+            print(f"[自动下单] 支付链接: {result.get('payurl', '')}", flush=True)
+        else:
+            print(f"[自动下单] 失败: {result.get('message', '未知错误')}", flush=True)
+        # 只处理第一个可下单的 ldxp 报价
+        if result.get("success"):
+            break
 
 
 def check_once(
