@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """Monitor PriceAI product offers and notify when a rule matches."""
 
 from __future__ import annotations
@@ -212,8 +212,9 @@ def extract_price_radar_offers(
             if offer is not None:
                 offers.append(offer)
     generated_at = (
-        preset.get("generated_at")
+        product.get("latest_seen_at")
         or product.get("snapshot_generated_at")
+        or preset.get("generated_at")
         or snapshot.get("generated_at")
         or ""
     )
@@ -428,7 +429,19 @@ def format_price(offer: Offer) -> str:
 
 def format_offer_line(offer: Offer) -> str:
     stock = "库存未知" if offer.stock_count is None else f"库存 {offer.stock_count}"
-    return f"{format_price(offer)}｜{stock}｜{offer.seller}｜{offer.title}\n{offer.url}"
+    updated = "时间未知"
+    parsed = parse_api_time(offer.updated_at)
+    if parsed is not None:
+        seconds = int((datetime.now(timezone.utc) - parsed).total_seconds())
+        if seconds < 60:
+            updated = "刚刚"
+        elif seconds < 3600:
+            updated = f"{seconds // 60}分钟前"
+        elif seconds < 86400:
+            updated = f"{seconds // 3600}小时前"
+        else:
+            updated = f"{seconds // 86400}天前"
+    return f"{format_price(offer)}｜{stock}｜更新 {updated}｜{offer.seller}｜{offer.title}\n{offer.url}"
 
 
 def build_notification(offers: list[Offer], config: dict[str, Any]) -> tuple[str, str]:
@@ -555,7 +568,7 @@ def check_once(
     generated_at = payload.get("generatedAt") or "未知"
     print(
         f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
-        f"接口返回 {len(offers)} 条，匹配 {len(matched)} 条，数据时间 {generated_at}",
+        f"接口返回 {len(offers)} 条，匹配 {len(matched)} 条",
         flush=True,
     )
 
