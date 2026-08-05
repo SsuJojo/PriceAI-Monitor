@@ -25,5 +25,12 @@
       "bot_token": "",
       "chat_id": ""
     }
+  },
+  "simple_monitor": {
+    "url": "https://priceai.cc/products/chatgpt-plus?back=platform%3DChatGPT",
+    "alarm_below_price": 14.0,
+    "check_interval_seconds": 3600,
+    "bark_key": "YOUR_BARK_KEY_HERE",
+    "bark_title": "ChatGPT Plus 价格报警"
   }
 }
