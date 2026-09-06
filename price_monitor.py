@@ -683,6 +683,27 @@ def try_auto_order(offers: list[Offer], config: dict[str, Any]) -> None:
             break
 
 
+def _format_offer_summary_line(offer: Offer) -> str:
+    stock = "库存未知" if offer.stock_count is None else f"库存 {offer.stock_count}"
+    parsed = parse_api_time(offer.updated_at)
+    if parsed is not None:
+        seconds = int((datetime.now(timezone.utc) - parsed).total_seconds())
+        if seconds < 60:
+            updated = "刚刚"
+        elif seconds < 3600:
+            updated = f"{seconds // 60}m前"
+        elif seconds < 86400:
+            updated = f"{seconds // 3600}h前"
+        else:
+            updated = f"{seconds // 86400}d前"
+    else:
+        updated = "-"
+    # 渠道/店铺名截断保排版
+    seller = offer.seller[:10]
+    title = offer.title[:28]
+    return f"  · {format_price(offer):<8} | {stock:<8} | {updated:<6} | {seller:<10} | {title}"
+
+
 def check_once(
     config: dict[str, Any], state_path: Path, *, dry_run: bool = False
 ) -> tuple[int, int]:
@@ -692,33 +713,49 @@ def check_once(
     state["price_radar"] = next_radar_cache
     matched = sort_offers(offer for offer in offers if matches_config(offer, config))
     generated_at = payload.get("generatedAt") or "未知"
+    now_str = datetime.now().strftime("%H:%M:%S")
 
     if dry_run:
-        print(
-            f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
-            f"接口返回 {len(offers)} 条，匹配 {len(matched)} 条",
-            flush=True,
-        )
-        for offer in matched:
-            print(f"- {format_offer_line(offer)}", flush=True)
+        print(f"[{now_str}] 扫描完成：接口返回 {len(offers)} 条，符合条件 {len(matched)} 条：", flush=True)
+        if matched:
+            for offer in matched:
+                print(_format_offer_summary_line(offer), flush=True)
+        else:
+            print("  (暂无符合当前筛选条件的报价)", flush=True)
         return len(offers), len(matched)
+
+    # 计算本次匹配列表指纹
+    current_snapshot = [f"{o.id}|{o.price:.4f}|{o.stock_count}" for o in matched]
+    last_snapshot = state.get("last_offer_snapshot", [])
 
     candidates = notification_candidates(matched, state)
     dedup_count = len(matched) - len(candidates)
-    print(
-        f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
-        f"接口返回 {len(offers)} 条，匹配 {len(matched)} 条，去重 {dedup_count} 条",
-        flush=True,
-    )
+
+    if current_snapshot != last_snapshot:
+        # 报价列表或价格/库存发生变动：输出完整表格
+        print(
+            f"[{now_str}] 发现变动：接口 {len(offers)} 条，符合 {len(matched)} 条（新/变动 {len(candidates)} 条）：",
+            flush=True,
+        )
+        if matched:
+            for offer in matched:
+                print(_format_offer_summary_line(offer), flush=True)
+        else:
+            print("  (当前无符合条件的报价)", flush=True)
+    else:
+        # 结果与上次一致：仅输出一行静默状态，不刷屏
+        best_str = f"，最低 {format_price(matched[0])}" if matched else ""
+        print(f"[{now_str}] 监控中：符合条件 {len(matched)} 条{best_str}（报价无变动）", flush=True)
 
     if candidates:
         notify(candidates, config)
 
-    # 用本次匹配结果覆盖上次记录，下次扫描时用于对比
+    # 更新状态
     state["last_offers"] = {
         offer.id: {"price": offer.price, "stock_count": offer.stock_count}
         for offer in matched
     }
+    state["last_offer_snapshot"] = current_snapshot
     state["last_success_at"] = datetime.now(timezone.utc).isoformat()
     state["last_generated_at"] = generated_at
     save_state(state_path, state)
@@ -727,7 +764,7 @@ def check_once(
 
 def run_watch(config: dict[str, Any], state_path: Path) -> None:
     interval = int(config.get("check_interval_seconds", 60))
-    print(f"PriceAI 监控已启动，每 {interval} 秒检查一次。按 Ctrl+C 停止。", flush=True)
+    print(f"PriceAI 价格监控已启动，检查周期：{interval} 秒（按 Ctrl+C 退出）", flush=True)
     consecutive_errors = 0
     while True:
         # 暂停检查：标志文件存在时循环等待，直到被删除
@@ -739,13 +776,13 @@ def run_watch(config: dict[str, Any], state_path: Path) -> None:
             consecutive_errors = 0
         except MonitorError as exc:
             consecutive_errors += 1
-            print(f"[检查失败 {consecutive_errors}] {exc}", file=sys.stderr, flush=True)
+            print(f"[检查失败 #{consecutive_errors}] {exc}", file=sys.stderr, flush=True)
         elapsed = time.monotonic() - started
         delay = max(1.0, interval - elapsed)
         try:
             time.sleep(delay)
         except KeyboardInterrupt:
-            print("\n监控已停止。", flush=True)
+            print("\n监控已退出。", flush=True)
             return
 
 
@@ -761,9 +798,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def configure_output_streams() -> None:
-    # Legacy Windows PowerShell commonly exposes a GBK console. Merchant names
-    # may contain emoji, so keep the monitor alive even when a glyph cannot be
-    # represented by the current terminal encoding.
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
         if callable(reconfigure):
@@ -784,9 +818,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"错误：{exc}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:
-        print("\n已停止。")
+        print("\n监控已退出。")
+        return 0
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except KeyboardInterrupt:
+        pass

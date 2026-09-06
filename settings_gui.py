@@ -671,7 +671,7 @@ class SettingsApp:
                     self.start_button.configure(state="normal")
                     self.status.set("测试完成" if return_code == 0 else "测试失败")
                 elif kind == "monitor_done":
-                    self._append_log(f"--- 监控已停止（退出码 {value}）---\n")
+                    self._append_log("--- 监控已停止 ---\n")
                     self.monitor_process = None
                     self.start_button.configure(state="normal")
                     self.test_button.configure(state="normal")
