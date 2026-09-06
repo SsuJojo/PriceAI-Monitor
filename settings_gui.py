@@ -14,7 +14,171 @@ import tkinter as tk
 import webbrowser
 from pathlib import Path
 from tkinter import messagebox, ttk
-from typing import Any
+from typing import Any, Callable
+
+if os.name == "nt":
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    shell32 = ctypes.windll.shell32
+    kernel32 = ctypes.windll.kernel32
+
+    user32.DefWindowProcW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+    user32.DefWindowProcW.restype = ctypes.c_longlong
+
+    WNDPROC = ctypes.WINFUNCTYPE(ctypes.c_longlong, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
+
+    WM_USER = 0x0400
+    WM_TRAY = WM_USER + 100
+    WM_COMMAND = 0x0111
+    WM_DESTROY = 0x0002
+    WM_LBUTTONUP = 0x0202
+    WM_LBUTTONDBLCLK = 0x0203
+    WM_RBUTTONUP = 0x0205
+
+    NIF_MESSAGE = 0x00000001
+    NIF_ICON = 0x00000002
+    NIF_TIP = 0x00000004
+    NIM_ADD = 0x00000000
+    NIM_DELETE = 0x00000002
+
+    MF_STRING = 0x00000000
+    MF_SEPARATOR = 0x00000800
+    TPM_RIGHTBUTTON = 0x0002
+
+    IDI_APPLICATION = 32512
+
+    class WNDCLASSW(ctypes.Structure):
+        _fields_ = [
+            ("style", wintypes.UINT),
+            ("lpfnWndProc", WNDPROC),
+            ("cbClsExtra", ctypes.c_int),
+            ("cbWndExtra", ctypes.c_int),
+            ("hInstance", wintypes.HINSTANCE),
+            ("hIcon", wintypes.HICON),
+            ("hCursor", wintypes.HICON),
+            ("hbrBackground", wintypes.HBRUSH),
+            ("lpszMenuName", wintypes.LPCWSTR),
+            ("lpszClassName", wintypes.LPCWSTR),
+        ]
+
+    class NOTIFYICONDATAW(ctypes.Structure):
+        _fields_ = [
+            ("cbSize", wintypes.DWORD),
+            ("hWnd", wintypes.HWND),
+            ("uID", wintypes.UINT),
+            ("uFlags", wintypes.UINT),
+            ("uCallbackMessage", wintypes.UINT),
+            ("hIcon", wintypes.HICON),
+            ("szTip", wintypes.WCHAR * 128),
+            ("dwState", wintypes.DWORD),
+            ("dwStateMask", wintypes.DWORD),
+            ("szInfo", wintypes.WCHAR * 256),
+            ("uTimeoutOrVersion", wintypes.UINT),
+            ("szInfoTitle", wintypes.WCHAR * 64),
+            ("dwInfoFlags", wintypes.DWORD),
+        ]
+
+    class POINT(ctypes.Structure):
+        _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+
+    class TrayIconManager:
+        def __init__(self, title: str, on_show: Callable[[], None], on_quit: Callable[[], None]) -> None:
+            self.title = title
+            self.on_show = on_show
+            self.on_quit = on_quit
+            self.hwnd: wintypes.HWND | None = None
+            self.thread: threading.Thread | None = None
+            self.running = False
+            self._class_name = f"PriceAI_Tray_{id(self)}"
+            self._wnd_proc_ref = WNDPROC(self._wnd_proc)
+
+        def start(self) -> None:
+            self.running = True
+            self.thread = threading.Thread(target=self._run_loop, daemon=True)
+            self.thread.start()
+
+        def _run_loop(self) -> None:
+            hinst = kernel32.GetModuleHandleW(None)
+            wc = WNDCLASSW()
+            wc.hInstance = hinst
+            wc.lpszClassName = self._class_name
+            wc.lpfnWndProc = self._wnd_proc_ref
+            user32.RegisterClassW(ctypes.byref(wc))
+
+            self.hwnd = user32.CreateWindowExW(
+                0, self._class_name, self.title, 0, 0, 0, 0, 0, 0, 0, hinst, None
+            )
+
+            nid = NOTIFYICONDATAW()
+            nid.cbSize = ctypes.sizeof(NOTIFYICONDATAW)
+            nid.hWnd = self.hwnd
+            nid.uID = 1001
+            nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP
+            nid.uCallbackMessage = WM_TRAY
+            nid.hIcon = user32.LoadIconW(0, IDI_APPLICATION)
+            nid.szTip = self.title[:127]
+
+            shell32.Shell_NotifyIconW(NIM_ADD, ctypes.byref(nid))
+
+            msg = wintypes.MSG()
+            while self.running and user32.GetMessageW(ctypes.byref(msg), 0, 0, 0) > 0:
+                user32.TranslateMessage(ctypes.byref(msg))
+                user32.DispatchMessageW(ctypes.byref(msg))
+
+            shell32.Shell_NotifyIconW(NIM_DELETE, ctypes.byref(nid))
+            if self.hwnd:
+                user32.DestroyWindow(self.hwnd)
+            user32.UnregisterClassW(self._class_name, hinst)
+
+        def stop(self) -> None:
+            self.running = False
+            if self.hwnd:
+                user32.PostMessageW(self.hwnd, WM_DESTROY, 0, 0)
+
+        def _show_menu(self) -> None:
+            hmenu = user32.CreatePopupMenu()
+            user32.AppendMenuW(hmenu, MF_STRING, 1, "显示主窗口")
+            user32.AppendMenuW(hmenu, MF_SEPARATOR, 0, "")
+            user32.AppendMenuW(hmenu, MF_STRING, 2, "退出程序")
+
+            pt = POINT()
+            user32.GetCursorPos(ctypes.byref(pt))
+            user32.SetForegroundWindow(self.hwnd)
+            user32.TrackPopupMenu(hmenu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, self.hwnd, None)
+            user32.DestroyMenu(hmenu)
+
+        def _wnd_proc(self, hwnd: int, msg: int, wparam: int, lparam: int) -> int:
+            if msg == WM_TRAY:
+                if lparam in (WM_LBUTTONUP, WM_LBUTTONDBLCLK):
+                    if self.on_show:
+                        self.on_show()
+                    return 0
+                elif lparam == WM_RBUTTONUP:
+                    self._show_menu()
+                    return 0
+            elif msg == WM_COMMAND:
+                cmd_id = wparam & 0xFFFF
+                if cmd_id == 1:
+                    if self.on_show:
+                        self.on_show()
+                elif cmd_id == 2:
+                    if self.on_quit:
+                        self.on_quit()
+                return 0
+            elif msg == WM_DESTROY:
+                user32.PostQuitMessage(0)
+                return 0
+            return int(user32.DefWindowProcW(hwnd, msg, wparam, lparam))
+else:
+    class TrayIconManager:  # type: ignore[no-redef]
+        def __init__(self, title: str, on_show: Callable[[], None], on_quit: Callable[[], None]) -> None:
+            pass
+        def start(self) -> None:
+            pass
+        def stop(self) -> None:
+            pass
 
 
 APP_DIR = Path(__file__).resolve().parent
@@ -136,6 +300,14 @@ class SettingsApp:
         self._set_keywords()
         self.root.after(100, self._drain_events)
 
+        # 启动系统托盘图标
+        self.tray = TrayIconManager(
+            title="PriceAI 账号价格监控",
+            on_show=self.show_window,
+            on_quit=self.quit_app,
+        )
+        self.tray.start()
+
     def _build_ui(self) -> None:
         outer = ttk.Frame(self.root, padding=14)
         outer.pack(fill="both", expand=True)
@@ -171,7 +343,7 @@ class SettingsApp:
         ttk.Label(content_frame, text="PriceAI 账号价格监控", font=("Microsoft YaHei UI", 13, "bold")).pack(anchor="w")
         ttk.Label(
             content_frame,
-            text="官方 Price Radar 快照：ChatGPT Plus 试用订阅（含全网最低价与精选推荐）",
+            text="官方 Price Radar 快照：ChatGPT Plus 试用订阅（点击 ✕ 最小化到托盘，右键托盘退出）",
             foreground="#555555",
             font=("Microsoft YaHei UI", 8),
         ).pack(anchor="w", pady=(1, 6))
@@ -554,20 +726,41 @@ class SettingsApp:
         env["PYTHONUTF8"] = "1"
         return env
 
+    def show_window(self) -> None:
+        def _restore() -> None:
+            self.root.deiconify()
+            self.root.lift()
+            self.root.focus_force()
+
+        self.root.after(0, _restore)
+
     def on_close(self) -> None:
-        if self.monitor_process is not None:
-            close = messagebox.askyesno(
-                "停止监控？",
-                "关闭设置窗口会同时停止正在运行的监控，确定关闭吗？",
-                parent=self.root,
-            )
-            if not close:
-                return
+        # 点击右上角 X：不关闭，而是最小化到系统托盘
+        self.root.withdraw()
+
+    def quit_app(self) -> None:
+        def _quit() -> None:
+            if self.monitor_process is not None:
+                # 弹窗询问前如果窗口被隐藏则先恢复展示
+                self.root.deiconify()
+                close = messagebox.askyesno(
+                    "退出程序？",
+                    "退出程序将同时停止正在运行的监控后台，确定退出吗？",
+                    parent=self.root,
+                )
+                if not close:
+                    return
+                try:
+                    self.monitor_process.terminate()
+                except OSError:
+                    pass
             try:
-                self.monitor_process.terminate()
-            except OSError:
+                self.tray.stop()
+            except Exception:
                 pass
-        self.root.destroy()
+            self.root.destroy()
+
+        self.root.after(0, _quit)
 
 
 def main() -> int:
