@@ -147,79 +147,9 @@ class SettingsApp:
         right_frame = ttk.Frame(outer)
         right_frame.pack(side="left", fill="both", expand=True, padx=(10, 0))
 
-        # ── 左侧：设置区 ──
-        ttk.Label(left_frame, text="PriceAI 账号价格监控", font=("Microsoft YaHei UI", 14, "bold")).pack(anchor="w")
-        ttk.Label(
-            left_frame,
-            text="官方 Price Radar 快照：ChatGPT Plus 试用订阅（含全网最低价与精选推荐）",
-            foreground="#555555",
-        ).pack(anchor="w", pady=(3, 8))
-
-        target = ttk.LabelFrame(left_frame, text="固定监控目标", padding=10)
-        target.pack(fill="x", pady=(0, 8))
-        ttk.Label(target, text="商品").grid(row=0, column=0, sticky="w", padx=(0, 10))
-        ttk.Label(target, text="ChatGPT Plus 试用订阅（chatgpt-plus）").grid(row=0, column=1, sticky="w")
-        ttk.Label(target, text="范围").grid(row=1, column=0, sticky="w", padx=(0, 10), pady=(5, 0))
-        ttk.Label(target, text="全网最低报价 + Top 报价（支持自动下单与多渠道提醒）").grid(row=1, column=1, sticky="w", pady=(5, 0))
-
-        rules = ttk.LabelFrame(left_frame, text="监控条件", padding=10)
-        rules.pack(fill="x", pady=(0, 8))
-        rules.columnconfigure(1, weight=1)
-        rules.columnconfigure(4, weight=1)
-        self._entry_row(rules, 0, "最高监控价格（报价 ≤ 此值）", self.max_price, "元", 0)
-        self._entry_row(rules, 0, "刷新间隔", self.interval, "秒（至少 60）", 3)
-        self._entry_row(rules, 1, "最低价格（排除异常低价）", self.min_price, "元", 0)
-        self._entry_row(rules, 1, "最低库存", self.min_stock, "个", 3)
-        self._entry_row(rules, 2, "报价有效时间", self.freshness, "分钟；0 为不限", 0)
-
-        keywords = ttk.LabelFrame(left_frame, text="关键词过滤（一行一个，也可用逗号分隔）", padding=10)
-        keywords.pack(fill="both", pady=(0, 8))
-        keywords.columnconfigure(0, weight=1)
-        keywords.columnconfigure(1, weight=1)
-        ttk.Label(keywords, text="包含").grid(row=0, column=0, sticky="w")
-        ttk.Label(keywords, text="排除").grid(row=0, column=1, sticky="w", padx=(10, 0))
-        self.required_text = self._make_keyword_text(keywords, "关键词\n渠道\n商品名")
-        self.excluded_text = self._make_keyword_text(keywords, "网页\n无质保\n日抛")
-        self.required_text.grid(row=1, column=0, sticky="nsew", pady=(4, 0))
-        self.excluded_text.grid(row=1, column=1, sticky="nsew", padx=(10, 0), pady=(4, 0))
-
-        options = ttk.LabelFrame(left_frame, text="提醒通知设置", padding=10)
-        options.pack(fill="x", pady=(0, 8))
-        options.columnconfigure(1, weight=1)
-        ttk.Checkbutton(options, text="启用 Windows 桌面通知", variable=self.windows_toast).grid(
-            row=0, column=0, columnspan=2, sticky="w"
-        )
-        ttk.Label(options, text="Bark 推送 Key").grid(row=1, column=0, sticky="w", padx=(0, 10), pady=(5, 0))
-        ttk.Entry(options, textvariable=self.bark_key).grid(
-            row=1, column=1, sticky="ew", pady=(5, 0)
-        )
-        ttk.Label(options, text="Bark 标题").grid(row=2, column=0, sticky="w", padx=(0, 10), pady=(5, 0))
-        ttk.Entry(options, textvariable=self.bark_title).grid(
-            row=2, column=1, sticky="ew", pady=(5, 0)
-        )
-
-        auto_frame = ttk.LabelFrame(left_frame, text="自动下单（链动小铺）", padding=10)
-        auto_frame.pack(fill="x", pady=(0, 8))
-        auto_frame.columnconfigure(1, weight=1)
-        ttk.Checkbutton(auto_frame, text="启用自动下单", variable=self.auto_order_enabled).grid(
-            row=0, column=0, columnspan=2, sticky="w"
-        )
-        ttk.Label(auto_frame, text="联系方式").grid(row=1, column=0, sticky="w", padx=(0, 10), pady=(5, 0))
-        ttk.Entry(auto_frame, textvariable=self.auto_order_contact).grid(
-            row=1, column=1, sticky="ew", pady=(5, 0)
-        )
-        ttk.Label(auto_frame, text="安全密码").grid(row=2, column=0, sticky="w", padx=(0, 10), pady=(5, 0))
-        ttk.Entry(auto_frame, textvariable=self.auto_order_password, show="*").grid(
-            row=2, column=1, sticky="ew", pady=(5, 0)
-        )
-
-        status_bar = ttk.Frame(left_frame)
-        status_bar.pack(fill="x", pady=(0, 4))
-        ttk.Label(status_bar, text="当前状态：", foreground="#555555").pack(side="left")
-        ttk.Label(status_bar, textvariable=self.status, foreground="#245c3c", font=("Microsoft YaHei UI", 9, "bold")).pack(side="left")
-
+        # ── 左侧底部固定区：状态栏与操作按钮（优先置底，确保任何分辨率下均可见） ──
         buttons = ttk.Frame(left_frame)
-        buttons.pack(fill="x", pady=(0, 10))
+        buttons.pack(side="bottom", fill="x", pady=(6, 0))
         self.save_button = ttk.Button(buttons, text="保存设置", command=self.save_settings)
         self.test_button = ttk.Button(buttons, text="测试扫描", command=self.test_scan)
         self.start_button = ttk.Button(buttons, text="保存并启动监控", command=self.start_monitor)
@@ -227,7 +157,82 @@ class SettingsApp:
         self.stop_button = ttk.Button(buttons, text="停止监控", command=self.stop_monitor, state="disabled")
         self.clear_button = ttk.Button(buttons, text="清空日志", command=self.clear_log)
         for button in (self.save_button, self.test_button, self.start_button, self.pause_button, self.stop_button, self.clear_button):
-            button.pack(side="left", padx=(0, 8))
+            button.pack(side="left", padx=(0, 6))
+
+        status_bar = ttk.Frame(left_frame)
+        status_bar.pack(side="bottom", fill="x", pady=(4, 2))
+        ttk.Label(status_bar, text="当前状态：", foreground="#555555").pack(side="left")
+        ttk.Label(status_bar, textvariable=self.status, foreground="#245c3c", font=("Microsoft YaHei UI", 9, "bold")).pack(side="left")
+
+        # ── 左侧主体内容区 ──
+        content_frame = ttk.Frame(left_frame)
+        content_frame.pack(side="top", fill="both", expand=True)
+
+        ttk.Label(content_frame, text="PriceAI 账号价格监控", font=("Microsoft YaHei UI", 13, "bold")).pack(anchor="w")
+        ttk.Label(
+            content_frame,
+            text="官方 Price Radar 快照：ChatGPT Plus 试用订阅（含全网最低价与精选推荐）",
+            foreground="#555555",
+            font=("Microsoft YaHei UI", 8),
+        ).pack(anchor="w", pady=(1, 6))
+
+        target = ttk.LabelFrame(content_frame, text="固定监控目标", padding=6)
+        target.pack(fill="x", pady=(0, 6))
+        ttk.Label(target, text="商品").grid(row=0, column=0, sticky="w", padx=(0, 10))
+        ttk.Label(target, text="ChatGPT Plus 试用订阅（chatgpt-plus）").grid(row=0, column=1, sticky="w")
+        ttk.Label(target, text="范围").grid(row=1, column=0, sticky="w", padx=(0, 10), pady=(3, 0))
+        ttk.Label(target, text="全网最低报价 + Top 报价（支持自动下单与多渠道提醒）").grid(row=1, column=1, sticky="w", pady=(3, 0))
+
+        rules = ttk.LabelFrame(content_frame, text="监控条件", padding=6)
+        rules.pack(fill="x", pady=(0, 6))
+        rules.columnconfigure(1, weight=1)
+        rules.columnconfigure(4, weight=1)
+        self._entry_row(rules, 0, "最高价格", self.max_price, "元", 0)
+        self._entry_row(rules, 0, "刷新间隔", self.interval, "秒", 3)
+        self._entry_row(rules, 1, "最低价格", self.min_price, "元", 0)
+        self._entry_row(rules, 1, "最低库存", self.min_stock, "个", 3)
+        self._entry_row(rules, 2, "有效时间", self.freshness, "分钟(0不限)", 0)
+
+        keywords = ttk.LabelFrame(content_frame, text="关键词过滤（一行一个，或逗号分隔）", padding=6)
+        keywords.pack(fill="x", pady=(0, 6))
+        keywords.columnconfigure(0, weight=1)
+        keywords.columnconfigure(1, weight=1)
+        ttk.Label(keywords, text="包含").grid(row=0, column=0, sticky="w")
+        ttk.Label(keywords, text="排除").grid(row=0, column=1, sticky="w", padx=(10, 0))
+        self.required_text = self._make_keyword_text(keywords, "关键词\n渠道\n商品名")
+        self.excluded_text = self._make_keyword_text(keywords, "网页\n无质保\n日抛")
+        self.required_text.grid(row=1, column=0, sticky="nsew", pady=(2, 0))
+        self.excluded_text.grid(row=1, column=1, sticky="nsew", padx=(10, 0), pady=(2, 0))
+
+        options = ttk.LabelFrame(content_frame, text="提醒通知设置", padding=6)
+        options.pack(fill="x", pady=(0, 6))
+        options.columnconfigure(1, weight=1)
+        ttk.Checkbutton(options, text="启用 Windows 桌面通知", variable=self.windows_toast).grid(
+            row=0, column=0, columnspan=2, sticky="w"
+        )
+        ttk.Label(options, text="Bark 推送 Key").grid(row=1, column=0, sticky="w", padx=(0, 10), pady=(3, 0))
+        ttk.Entry(options, textvariable=self.bark_key).grid(
+            row=1, column=1, sticky="ew", pady=(3, 0)
+        )
+        ttk.Label(options, text="Bark 标题").grid(row=2, column=0, sticky="w", padx=(0, 10), pady=(3, 0))
+        ttk.Entry(options, textvariable=self.bark_title).grid(
+            row=2, column=1, sticky="ew", pady=(3, 0)
+        )
+
+        auto_frame = ttk.LabelFrame(content_frame, text="自动下单（链动小铺）", padding=6)
+        auto_frame.pack(fill="x", pady=(0, 4))
+        auto_frame.columnconfigure(1, weight=1)
+        ttk.Checkbutton(auto_frame, text="启用自动下单", variable=self.auto_order_enabled).grid(
+            row=0, column=0, columnspan=2, sticky="w"
+        )
+        ttk.Label(auto_frame, text="联系方式").grid(row=1, column=0, sticky="w", padx=(0, 10), pady=(3, 0))
+        ttk.Entry(auto_frame, textvariable=self.auto_order_contact).grid(
+            row=1, column=1, sticky="ew", pady=(3, 0)
+        )
+        ttk.Label(auto_frame, text="安全密码").grid(row=2, column=0, sticky="w", padx=(0, 10), pady=(3, 0))
+        ttk.Entry(auto_frame, textvariable=self.auto_order_password, show="*").grid(
+            row=2, column=1, sticky="ew", pady=(3, 0)
+        )
 
         # ── 右侧：日志区 ──
         log_frame = ttk.LabelFrame(right_frame, text="运行日志", padding=6)
