@@ -539,11 +539,13 @@ def send_telegram(bot_token: str, chat_id: str, title: str, body: str) -> None:
         raise MonitorError(f"Telegram 发送失败：{exc}") from exc
 
 
-def send_bark(bark_key: str, title: str, body: str) -> None:
-    """通过 Bark 发送 iOS 推送通知"""
+def send_bark(bark_key: str, title: str, body: str, url: str = "") -> None:
+    """通过 Bark 发送 iOS 推送通知，并携带直达链接"""
     encoded_title = urllib.parse.quote(title)
     encoded_body = urllib.parse.quote(body)
     bark_url = f"https://api.day.app/{bark_key}/{encoded_title}/{encoded_body}"
+    if url:
+        bark_url += f"?url={urllib.parse.quote(url)}"
     request = urllib.request.Request(bark_url, headers={"User-Agent": USER_AGENT})
     try:
         with urllib.request.urlopen(request, timeout=15) as response:
@@ -562,12 +564,16 @@ def xml_escape(value: str) -> str:
     )
 
 
-def send_windows_toast(title: str, body: str) -> None:
+def send_windows_toast(title: str, body: str, launch_url: str = "") -> None:
     if platform.system() != "Windows":
         return
     short_body = body.replace("\n", " ")[:240]
+    if launch_url:
+        launch_attr = f' activationType="protocol" launch="{xml_escape(launch_url)}"'
+    else:
+        launch_attr = ""
     toast_xml = (
-        '<toast><visual><binding template="ToastGeneric">'
+        f"<toast{launch_attr}><visual><binding template=\"ToastGeneric\">"
         f"<text>{xml_escape(title)}</text><text>{xml_escape(short_body)}</text>"
         "</binding></visual></toast>"
     )
@@ -596,6 +602,9 @@ def notify(offers: list[Offer], config: dict[str, Any]) -> None:
     title, body = build_notification(offers, config)
     print(f"\n{'=' * 72}\n{title}\n{'-' * 72}\n{body}\n{'=' * 72}", flush=True)
 
+    # 最优商品直达链接（用于通知点击直达）
+    primary_url = offers[0].url if offers else ""
+
     # 自动下单优先执行，抢在所有通知之前
     try_auto_order(offers, config)
 
@@ -604,16 +613,17 @@ def notify(offers: list[Offer], config: dict[str, Any]) -> None:
 
     if settings.get("windows_toast", True):
         try:
-            send_windows_toast(title, body)
+            send_windows_toast(title, body, launch_url=primary_url)
         except (OSError, subprocess.SubprocessError) as exc:
             errors.append(f"Windows 通知失败：{exc}")
 
-    # Bark 推送支持：优先读取 notifications.bark_key，兼容 simple_monitor.bark_key
+    # Bark 推送支持：需要满足 bark_enabled 开关开启（默认有 key 且未显式关闭时开启）
     bark_key = str(settings.get("bark_key") or config.get("simple_monitor", {}).get("bark_key") or "").strip()
-    if bark_key:
+    bark_enabled = bool(settings.get("bark_enabled", bool(bark_key)))
+    if bark_enabled and bark_key:
         bark_title = str(settings.get("bark_title") or config.get("simple_monitor", {}).get("bark_title") or "ChatGPT Plus 价格报警").strip()
         try:
-            send_bark(bark_key, bark_title, body)
+            send_bark(bark_key, bark_title, body, url=primary_url)
         except MonitorError as exc:
             errors.append(str(exc))
 
@@ -701,7 +711,10 @@ def _format_offer_summary_line(offer: Offer) -> str:
     # 渠道/店铺名截断保排版
     seller = offer.seller[:10]
     title = offer.title[:28]
-    return f"  · {format_price(offer):<8} | {stock:<8} | {updated:<6} | {seller:<10} | {title}"
+    summary = f"  · {format_price(offer):<8} | {stock:<8} | {updated:<6} | {seller:<10} | {title}"
+    if offer.url:
+        summary += f"\n    直达链接: {offer.url}"
+    return summary
 
 
 def check_once(

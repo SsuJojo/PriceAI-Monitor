@@ -20,6 +20,7 @@
   },
   "notifications": {
     "windows_toast": true,
+    "bark_enabled": false,
     "bark_key": "",
     "bark_title": "ChatGPT Plus 价格报警",
     "webhook_url": "",

@@ -284,6 +284,7 @@ class SettingsApp:
             notifications = {}
         self.windows_toast = tk.BooleanVar(value=bool(notifications.get("windows_toast", True)))
         simple_cfg = self.config.get("simple_monitor") if isinstance(self.config.get("simple_monitor"), dict) else {}
+        self.bark_enabled = tk.BooleanVar(value=bool(notifications.get("bark_enabled", bool(notifications.get("bark_key") or simple_cfg.get("bark_key")))))
         self.bark_key = tk.StringVar(value=str(notifications.get("bark_key") or simple_cfg.get("bark_key") or ""))
         self.bark_title = tk.StringVar(value=str(notifications.get("bark_title") or simple_cfg.get("bark_title") or "ChatGPT Plus 价格报警"))
         auto_order_cfg = self.config.get("auto_order")
@@ -379,16 +380,28 @@ class SettingsApp:
         options = ttk.LabelFrame(content_frame, text="提醒通知设置", padding=6)
         options.pack(fill="x", pady=(0, 6))
         options.columnconfigure(1, weight=1)
-        ttk.Checkbutton(options, text="启用 Windows 桌面通知", variable=self.windows_toast).grid(
+
+        # ── Windows 桌面通知 ──
+        ttk.Checkbutton(options, text="启用 Windows 桌面通知（点击卡片直达商铺）", variable=self.windows_toast).grid(
             row=0, column=0, columnspan=2, sticky="w"
         )
-        ttk.Label(options, text="Bark 推送 Key").grid(row=1, column=0, sticky="w", padx=(0, 10), pady=(3, 0))
-        ttk.Entry(options, textvariable=self.bark_key).grid(
-            row=1, column=1, sticky="ew", pady=(3, 0)
+
+        # ── 分隔线 ──
+        ttk.Separator(options, orient="horizontal").grid(
+            row=1, column=0, columnspan=2, sticky="ew", pady=(6, 6)
         )
-        ttk.Label(options, text="Bark 标题").grid(row=2, column=0, sticky="w", padx=(0, 10), pady=(3, 0))
+
+        # ── Bark 手机推送 ──
+        ttk.Checkbutton(options, text="启用 Bark 手机推送（支持直达链接跳转）", variable=self.bark_enabled).grid(
+            row=2, column=0, columnspan=2, sticky="w"
+        )
+        ttk.Label(options, text="Bark 推送 Key").grid(row=3, column=0, sticky="w", padx=(0, 10), pady=(3, 0))
+        ttk.Entry(options, textvariable=self.bark_key).grid(
+            row=3, column=1, sticky="ew", pady=(3, 0)
+        )
+        ttk.Label(options, text="Bark 标题").grid(row=4, column=0, sticky="w", padx=(0, 10), pady=(3, 0))
         ttk.Entry(options, textvariable=self.bark_title).grid(
-            row=2, column=1, sticky="ew", pady=(3, 0)
+            row=4, column=1, sticky="ew", pady=(3, 0)
         )
 
         auto_frame = ttk.LabelFrame(content_frame, text="自动下单（链动小铺）", padding=6)
@@ -493,6 +506,7 @@ class SettingsApp:
             if not isinstance(notifications, dict):
                 notifications = {}
             notifications["windows_toast"] = self.windows_toast.get()
+            notifications["bark_enabled"] = self.bark_enabled.get()
             bark_key_val = self.bark_key.get().strip()
             bark_title_val = self.bark_title.get().strip() or "ChatGPT Plus 价格报警"
             notifications["bark_key"] = bark_key_val
