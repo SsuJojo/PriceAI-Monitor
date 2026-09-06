@@ -3,27 +3,32 @@ setlocal
 cd /d "%~dp0"
 
 if not exist "%~dp0config.json" (
-    echo [ERROR] config.json was not found.
-    echo Please create it first or run the monitor once to generate default settings.
-    pause
-    exit /b 1
+    if exist "%~dp0config.example.json" (
+        copy "%~dp0config.example.json" "%~dp0config.json" >nul
+    )
 )
 
-rem Prefer default-py312 shared environment, launch hidden via PowerShell
-set "DEFAULT_PY=E:\DevTools\Python\envs\default-py312\Scripts\python.exe"
-if exist "%DEFAULT_PY%" (
-    powershell -NoProfile -Command "Start-Process -FilePath '%DEFAULT_PY%' -ArgumentList '\"%~dp0settings_gui.py\"' -WindowStyle Hidden"
+rem 1. Prefer local uv virtual environment
+if exist "%~dp0.venv\Scripts\python.exe" (
+    powershell -NoProfile -Command "Start-Process -FilePath '%~dp0.venv\Scripts\python.exe' -ArgumentList '\"%~dp0settings_gui.py\"' -WindowStyle Hidden"
     exit /b 0
 )
 
-rem Fallback: find python via PATH
-where python >nul 2>nul
-if errorlevel 1 (
-    echo [ERROR] Python was not found in PATH.
-    echo Install Python or add it to PATH and try again.
-    pause
-    exit /b 1
+rem 2. Try uv run if uv is available
+where uv >nul 2>nul
+if %ERRORLEVEL% equ 0 (
+    powershell -NoProfile -Command "Start-Process -FilePath 'uv' -ArgumentList 'run python \"%~dp0settings_gui.py\"' -WindowStyle Hidden"
+    exit /b 0
 )
 
-powershell -NoProfile -Command "Start-Process -FilePath 'python' -ArgumentList '\"%~dp0settings_gui.py\"' -WindowStyle Hidden"
-exit /b %ERRORLEVEL%
+rem 3. Fallback: find python via PATH
+where python >nul 2>nul
+if %ERRORLEVEL% equ 0 (
+    powershell -NoProfile -Command "Start-Process -FilePath 'python' -ArgumentList '\"%~dp0settings_gui.py\"' -WindowStyle Hidden"
+    exit /b 0
+)
+
+echo [ERROR] 未找到可用的 Python 或 uv 运行环境。
+echo 请先安装 uv 或 Python 并添加到 PATH。
+pause
+exit /b 1

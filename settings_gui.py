@@ -18,6 +18,7 @@ from typing import Any, Callable
 
 if os.name == "nt":
     import ctypes
+    import winreg
     from ctypes import wintypes
 
     user32 = ctypes.windll.user32
@@ -188,7 +189,8 @@ MONITOR_PATH = APP_DIR / "price_monitor.py"
 STATE_PATH = APP_DIR / "monitor_state.json"
 PAUSE_FLAG = APP_DIR / "monitor_pause.flag"
 MIN_INTERVAL_SECONDS = 60
-DEFAULT_PYTHON = r"E:\DevTools\Python\envs\default-py312\Scripts\python.exe"
+AUTOSTART_REG_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+AUTOSTART_APP_NAME = "PriceAI_Monitor"
 
 
 class SettingsError(ValueError):
@@ -265,8 +267,8 @@ class SettingsApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("PriceAI 账号价格监控")
-        self.root.geometry("1430x740")
-        self.root.minsize(900, 640)
+        self.root.geometry("1430x860")
+        self.root.minsize(900, 720)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
         self.config = load_config_file()
@@ -293,6 +295,7 @@ class SettingsApp:
         self.auto_order_enabled = tk.BooleanVar(value=bool(auto_order_cfg.get("enabled", False)))
         self.auto_order_contact = tk.StringVar(value=str(auto_order_cfg.get("contact", "")))
         self.auto_order_password = tk.StringVar(value=str(auto_order_cfg.get("query_password", "")))
+        self.autostart_var = tk.BooleanVar(value=self.is_autostart_enabled())
         self.status = tk.StringVar(value="未启动")
 
         self._placeholders: dict[tk.Text, str] = {}
@@ -419,6 +422,16 @@ class SettingsApp:
             row=2, column=1, sticky="ew", pady=(3, 0)
         )
 
+        sys_frame = ttk.LabelFrame(content_frame, text="系统与自启", padding=6)
+        sys_frame.pack(fill="x", pady=(0, 4))
+        sys_frame.columnconfigure(1, weight=1)
+        ttk.Checkbutton(
+            sys_frame,
+            text="开机自动启动 PriceAI 监控器（最小化托盘运行）",
+            variable=self.autostart_var,
+            command=self.toggle_autostart,
+        ).grid(row=0, column=0, sticky="w")
+
         # ── 右侧：日志区 ──
         log_frame = ttk.LabelFrame(right_frame, text="运行日志", padding=6)
         log_frame.pack(fill="both", expand=True)
@@ -460,7 +473,7 @@ class SettingsApp:
             self._show_placeholder(self.excluded_text)
 
     def _make_keyword_text(self, parent: ttk.Frame, placeholder: str) -> tk.Text:
-        text = tk.Text(parent, height=5, wrap="word")
+        text = tk.Text(parent, height=3, wrap="word")
         text.tag_configure("placeholder", foreground="#9aa0a6")
         self._placeholders[text] = placeholder
         text.bind("<FocusIn>", lambda _e, t=text: self._clear_placeholder(t))
@@ -728,10 +741,59 @@ class SettingsApp:
     def _creation_flags() -> int:
         return int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) if os.name == "nt" else 0
 
+    @classmethod
+    def is_autostart_enabled(cls) -> bool:
+        if os.name != "nt":
+            return False
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, AUTOSTART_REG_KEY, 0, winreg.KEY_READ) as key:
+                winreg.QueryValueEx(key, AUTOSTART_APP_NAME)
+                return True
+        except (OSError, WindowsError):
+            return False
+
+    @classmethod
+    def set_autostart(cls, enable: bool) -> tuple[bool, str]:
+        if os.name != "nt":
+            return False, "开机自启仅支持 Windows 平台"
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, AUTOSTART_REG_KEY, 0, winreg.KEY_SET_VALUE) as key:
+                if enable:
+                    # 如果打包为 exe 运行，优先使用当前 exe 路径
+                    if getattr(sys, "frozen", False):
+                        target_cmd = f'"{sys.executable}"'
+                    else:
+                        bat_path = APP_DIR / "start_monitor.bat"
+                        if bat_path.exists():
+                            target_cmd = f'"{bat_path}"'
+                        else:
+                            target_cmd = f'"{cls._python_executable()}" "{Path(__file__).resolve()}"'
+                    winreg.SetValueEx(key, AUTOSTART_APP_NAME, 0, winreg.REG_SZ, target_cmd)
+                    return True, "已成功开启开机自启"
+                else:
+                    try:
+                        winreg.DeleteValue(key, AUTOSTART_APP_NAME)
+                    except FileNotFoundError:
+                        pass
+                    return True, "已关闭开机自启"
+        except Exception as exc:
+            return False, f"配置开机自启失败: {exc}"
+
+    def toggle_autostart(self) -> None:
+        want_enable = self.autostart_var.get()
+        success, msg = self.set_autostart(want_enable)
+        if success:
+            self._append_log(f"系统设置：{msg}\n")
+        else:
+            messagebox.showerror("开机自启设置失败", msg, parent=self.root)
+            self.autostart_var.set(not want_enable)
+
     @staticmethod
     def _python_executable() -> str:
-        if os.path.exists(DEFAULT_PYTHON):
-            return DEFAULT_PYTHON
+        # 优先使用项目目录下的 .venv 虚拟环境
+        venv_python = APP_DIR / ".venv" / "Scripts" / "python.exe"
+        if venv_python.exists():
+            return str(venv_python)
         return sys.executable
 
     @staticmethod

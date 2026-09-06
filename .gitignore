@@ -8,3 +8,7 @@ __pycache__/
 .tmp_priceai_ref/
 *.jpeg
 _commit_msg.txt
+.venv/
+dist/
+build/
+*.spec
