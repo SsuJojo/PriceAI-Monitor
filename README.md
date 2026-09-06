@@ -103,6 +103,16 @@ uv run pyinstaller -F -w -n PriceAI-Monitor settings_gui.py
 
 ---
 
+## 开源协议与许可
+
+本项目采用 **ACNEPL (Anti-Commercial & Non-Endorsement Public License)** 许可：
+- ✅ **允许**：个人自用、学习研究、自由修改、基于相同协议非商业免费重分发。
+- ❌ **严禁**：任何形式的商业化运营、打包倒卖、付费服务集成、未授权使用作者名义背书。
+
+详见 [LICENSE](LICENSE) 文件。
+
+---
+
 ## 免责声明
 
 本项目仅供个人学习与自动化技术交流，使用者需自行遵守相关平台（包括但不限于 PriceAI、链动小铺、各卡网商户及 OpenAI）的服务条款与规范。作者不对因使用本工具而产生的任何交易、经济损失或法律后果承担责任。
