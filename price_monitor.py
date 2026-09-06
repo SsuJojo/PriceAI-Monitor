@@ -777,7 +777,7 @@ def check_once(
 
 def run_watch(config: dict[str, Any], state_path: Path) -> None:
     interval = int(config.get("check_interval_seconds", 60))
-    print(f"PriceAI 价格监控已启动，检查周期：{interval} 秒（按 Ctrl+C 退出）", flush=True)
+    print(f"PriceAI 价格监控已启动，检查周期：{interval} 秒", flush=True)
     consecutive_errors = 0
     while True:
         # 暂停检查：标志文件存在时循环等待，直到被删除
