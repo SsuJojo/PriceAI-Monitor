@@ -195,19 +195,68 @@ def extract_price_radar_offers(
         raise MonitorError(f"Price Radar 快照中找不到商品：{product_id}")
 
     presets = product.get("presets")
-    if not isinstance(presets, list):
-        raise MonitorError(f"商品 {product_id} 没有 presets 数据")
-    preset = next(
-        (item for item in presets if isinstance(item, dict) and item.get("id") == preset_id),
-        None,
-    )
-    if preset is None:
-        raise MonitorError(f"商品 {product_id} 没有筛选预设：{preset_id}")
-    raw_offers = preset.get("top_offers")
-    if not isinstance(raw_offers, list):
-        raise MonitorError(f"筛选预设 {preset_id} 缺少 top_offers")
+    preset = None
+    if isinstance(presets, list) and presets:
+        preset = next(
+            (item for item in presets if isinstance(item, dict) and item.get("id") == preset_id),
+            None,
+        )
+        if preset is None and preset_id:
+            # 如果指定了 preset_id 但找不到对应预设，也可以尝试匹配 name 或者报错
+            # 但若该商品预设列表里确实没有该 preset_id，先检查是否回退到商品顶层
+            pass
 
-    normalized_raw = [item for item in raw_offers if isinstance(item, dict)]
+    if preset is not None:
+        raw_offers = preset.get("top_offers")
+        total = preset.get("total")
+        generated_at = preset.get("generated_at")
+    else:
+        # 当没有 preset 数据或 presets 为空时，回退到商品自身的 top_offers
+        raw_offers = product.get("top_offers")
+        total = product.get("total") or product.get("offer_count")
+        generated_at = product.get("latest_seen_at") or product.get("snapshot_generated_at")
+
+    if not isinstance(raw_offers, list):
+        if preset_id and presets:
+            raise MonitorError(f"商品 {product_id} 没有筛选预设：{preset_id}")
+        raise MonitorError(f"商品 {product_id} 缺少 top_offers 报价数据")
+
+    # 合并商品的 lowest_offer（全网最低价），避免最低价只存在于 lowest_offer 而被 top_offers 漏掉
+    normalized_raw: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+
+    lowest_offer = product.get("lowest_offer")
+    if isinstance(lowest_offer, dict):
+        lo_copy = dict(lowest_offer)
+        lo_id = str(lo_copy.get("id") or lo_copy.get("url") or "").strip()
+        if lo_id:
+            # 补齐 lowest_offer 可能缺失的时间戳和有效状态，避免被过滤规则误杀
+            fallback_time = (
+                product.get("latest_seen_at")
+                or product.get("snapshot_generated_at")
+                or snapshot.get("generated_at")
+                or ""
+            )
+            if not (lo_copy.get("verified_at") or lo_copy.get("verifiedAt") or lo_copy.get("last_seen_at") or lo_copy.get("lastSeenAt")):
+                lo_copy["verified_at"] = fallback_time
+            if not lo_copy.get("effective_status") and not lo_copy.get("effectiveStatus"):
+                lo_copy["effective_status"] = "available"
+            if lo_copy.get("stock_count") is None and lo_copy.get("stockCount") is None:
+                # 官方快照中 lowest_offer 明确标明 status='in_stock'（有货），补充有效库存占位避免被最低库存拦截
+                if lo_copy.get("status") in AVAILABLE_STATUSES:
+                    lo_copy["stock_count"] = 1
+            normalized_raw.append(lo_copy)
+            seen_ids.add(lo_id)
+
+    for item in raw_offers:
+        if isinstance(item, dict):
+            item_id = str(item.get("id") or item.get("url") or "").strip()
+            if item_id and item_id not in seen_ids:
+                seen_ids.add(item_id)
+                normalized_raw.append(item)
+            elif not item_id:
+                normalized_raw.append(item)
+
     offers: list[Offer] = []
     for item in normalized_raw:
         if isinstance(item, dict):
@@ -215,9 +264,9 @@ def extract_price_radar_offers(
             if offer is not None:
                 offers.append(offer)
     generated_at = (
-        product.get("latest_seen_at")
+        generated_at
+        or product.get("latest_seen_at")
         or product.get("snapshot_generated_at")
-        or preset.get("generated_at")
         or snapshot.get("generated_at")
         or ""
     )
@@ -228,7 +277,7 @@ def extract_price_radar_offers(
         "source": "price-radar.v1",
         "product": product_id,
         "preset": preset_id,
-        "total": preset.get("total"),
+        "total": total,
     }
     return offers, payload, normalized_raw
 
@@ -490,6 +539,19 @@ def send_telegram(bot_token: str, chat_id: str, title: str, body: str) -> None:
         raise MonitorError(f"Telegram 发送失败：{exc}") from exc
 
 
+def send_bark(bark_key: str, title: str, body: str) -> None:
+    """通过 Bark 发送 iOS 推送通知"""
+    encoded_title = urllib.parse.quote(title)
+    encoded_body = urllib.parse.quote(body)
+    bark_url = f"https://api.day.app/{bark_key}/{encoded_title}/{encoded_body}"
+    request = urllib.request.Request(bark_url, headers={"User-Agent": USER_AGENT})
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            response.read()
+    except (urllib.error.URLError, TimeoutError) as exc:
+        raise MonitorError(f"Bark 推送失败：{exc}") from exc
+
+
 def xml_escape(value: str) -> str:
     return (
         value.replace("&", "&amp;")
@@ -545,6 +607,15 @@ def notify(offers: list[Offer], config: dict[str, Any]) -> None:
             send_windows_toast(title, body)
         except (OSError, subprocess.SubprocessError) as exc:
             errors.append(f"Windows 通知失败：{exc}")
+
+    # Bark 推送支持：优先读取 notifications.bark_key，兼容 simple_monitor.bark_key
+    bark_key = str(settings.get("bark_key") or config.get("simple_monitor", {}).get("bark_key") or "").strip()
+    if bark_key:
+        bark_title = str(settings.get("bark_title") or config.get("simple_monitor", {}).get("bark_title") or "ChatGPT Plus 价格报警").strip()
+        try:
+            send_bark(bark_key, bark_title, body)
+        except MonitorError as exc:
+            errors.append(str(exc))
 
     webhook_url = str(settings.get("webhook_url") or "").strip()
     if webhook_url:

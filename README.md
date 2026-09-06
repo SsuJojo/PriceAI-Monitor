@@ -1,14 +1,15 @@
 # PriceAI 账号价格监控
 
-通过 [PriceAI](https://priceai.cc) Price Radar V1 官方公开快照，定时检查 ChatGPT Plus「已接码成品号」Top 5 报价。匹配到合适报价时桌面通知提醒，并支持对链动小铺 (ldxp.cn) 商品**自动下单**。
+通过 [PriceAI](https://priceai.cc) Price Radar V1 官方公开快照，定时检查 ChatGPT Plus 试用订阅报价（含全网最低价与精选推荐）。匹配到合适报价时通知提醒，并支持对链动小铺 (ldxp.cn) 商品**自动下单**。
 
 ![程序截图](docs/程序截图.png)
 
 ## 功能概览
 
-- 定时轮询 Price Radar 快照，本地筛选价格、库存、关键词等条件
+- 定时轮询 Price Radar 快照，**自动收录全网最低价 (lowest_offer) 及 Top 报价**
+- 本地筛选价格、库存、关键词等多种条件
 - 与上次扫描对比去重：新报价、降价、库存增加时才提醒
-- Windows Toast 桌面通知
+- **多渠道通知**：Windows Toast 桌面通知、Bark iOS 推送、蜂鸣音提示、Webhook、Telegram
 - 自动下单：匹配到链动小铺报价后，通过 API 秒级下单并打开支付页
 - 下单后自动暂停监控，付款后手动点击「继续」恢复
 - GUI 左右分栏：左侧设置、右侧实时日志，日志中链接可点击
@@ -69,6 +70,12 @@ python settings_gui.py
 
 - 包含关键词 -- 标题必须同时包含所有关键词才匹配
 - 排除关键词 -- 包含任意一个就排除
+
+**提醒通知：**
+
+- Windows 桌面通知（Toast 弹窗）
+- Bark 推送（填写 Bark Key 即可自动将低价报价推送到 iPhone / iPad）
+- Webhook / Telegram 机器人推送（可在 config.json 中按需配置）
 
 **操作按钮：**
 

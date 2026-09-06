@@ -101,8 +101,8 @@ class SettingsApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("PriceAI 账号价格监控")
-        self.root.geometry("1430x680")
-        self.root.minsize(900, 600)
+        self.root.geometry("1430x740")
+        self.root.minsize(900, 640)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
         self.config = load_config_file()
@@ -119,6 +119,9 @@ class SettingsApp:
         if not isinstance(notifications, dict):
             notifications = {}
         self.windows_toast = tk.BooleanVar(value=bool(notifications.get("windows_toast", True)))
+        simple_cfg = self.config.get("simple_monitor") if isinstance(self.config.get("simple_monitor"), dict) else {}
+        self.bark_key = tk.StringVar(value=str(notifications.get("bark_key") or simple_cfg.get("bark_key") or ""))
+        self.bark_title = tk.StringVar(value=str(notifications.get("bark_title") or simple_cfg.get("bark_title") or "ChatGPT Plus 价格报警"))
         auto_order_cfg = self.config.get("auto_order")
         if not isinstance(auto_order_cfg, dict):
             auto_order_cfg = {}
@@ -148,7 +151,7 @@ class SettingsApp:
         ttk.Label(left_frame, text="PriceAI 账号价格监控", font=("Microsoft YaHei UI", 14, "bold")).pack(anchor="w")
         ttk.Label(
             left_frame,
-            text="官方 Price Radar：ChatGPT Plus 试用订阅 -> 已接码成品号 -> Top 5",
+            text="官方 Price Radar 快照：ChatGPT Plus 试用订阅（含全网最低价与精选推荐）",
             foreground="#555555",
         ).pack(anchor="w", pady=(3, 8))
 
@@ -156,8 +159,8 @@ class SettingsApp:
         target.pack(fill="x", pady=(0, 8))
         ttk.Label(target, text="商品").grid(row=0, column=0, sticky="w", padx=(0, 10))
         ttk.Label(target, text="ChatGPT Plus 试用订阅（chatgpt-plus）").grid(row=0, column=1, sticky="w")
-        ttk.Label(target, text="分类").grid(row=1, column=0, sticky="w", padx=(0, 10), pady=(5, 0))
-        ttk.Label(target, text="已接码成品号（account_verified）").grid(row=1, column=1, sticky="w", pady=(5, 0))
+        ttk.Label(target, text="范围").grid(row=1, column=0, sticky="w", padx=(0, 10), pady=(5, 0))
+        ttk.Label(target, text="全网最低报价 + Top 报价（支持自动下单与多渠道提醒）").grid(row=1, column=1, sticky="w", pady=(5, 0))
 
         rules = ttk.LabelFrame(left_frame, text="监控条件", padding=10)
         rules.pack(fill="x", pady=(0, 8))
@@ -180,10 +183,20 @@ class SettingsApp:
         self.required_text.grid(row=1, column=0, sticky="nsew", pady=(4, 0))
         self.excluded_text.grid(row=1, column=1, sticky="nsew", padx=(10, 0), pady=(4, 0))
 
-        options = ttk.Frame(left_frame)
+        options = ttk.LabelFrame(left_frame, text="提醒通知设置", padding=10)
         options.pack(fill="x", pady=(0, 8))
-        ttk.Checkbutton(options, text="启用 Windows 桌面通知", variable=self.windows_toast).pack(side="left")
-        ttk.Label(options, textvariable=self.status, foreground="#245c3c").pack(side="right")
+        options.columnconfigure(1, weight=1)
+        ttk.Checkbutton(options, text="启用 Windows 桌面通知", variable=self.windows_toast).grid(
+            row=0, column=0, columnspan=2, sticky="w"
+        )
+        ttk.Label(options, text="Bark 推送 Key").grid(row=1, column=0, sticky="w", padx=(0, 10), pady=(5, 0))
+        ttk.Entry(options, textvariable=self.bark_key).grid(
+            row=1, column=1, sticky="ew", pady=(5, 0)
+        )
+        ttk.Label(options, text="Bark 标题").grid(row=2, column=0, sticky="w", padx=(0, 10), pady=(5, 0))
+        ttk.Entry(options, textvariable=self.bark_title).grid(
+            row=2, column=1, sticky="ew", pady=(5, 0)
+        )
 
         auto_frame = ttk.LabelFrame(left_frame, text="自动下单（链动小铺）", padding=10)
         auto_frame.pack(fill="x", pady=(0, 8))
@@ -199,6 +212,11 @@ class SettingsApp:
         ttk.Entry(auto_frame, textvariable=self.auto_order_password, show="*").grid(
             row=2, column=1, sticky="ew", pady=(5, 0)
         )
+
+        status_bar = ttk.Frame(left_frame)
+        status_bar.pack(fill="x", pady=(0, 4))
+        ttk.Label(status_bar, text="当前状态：", foreground="#555555").pack(side="left")
+        ttk.Label(status_bar, textvariable=self.status, foreground="#245c3c", font=("Microsoft YaHei UI", 9, "bold")).pack(side="left")
 
         buttons = ttk.Frame(left_frame)
         buttons.pack(fill="x", pady=(0, 10))
@@ -297,10 +315,18 @@ class SettingsApp:
             notifications = updated.get("notifications")
             if not isinstance(notifications, dict):
                 notifications = {}
-            else:
-                notifications = dict(notifications)
             notifications["windows_toast"] = self.windows_toast.get()
+            bark_key_val = self.bark_key.get().strip()
+            bark_title_val = self.bark_title.get().strip() or "ChatGPT Plus 价格报警"
+            notifications["bark_key"] = bark_key_val
+            notifications["bark_title"] = bark_title_val
             updated["notifications"] = notifications
+
+            # 同步更新 simple_monitor 保持兼容
+            if "simple_monitor" in updated and isinstance(updated["simple_monitor"], dict):
+                updated["simple_monitor"]["bark_key"] = bark_key_val
+                updated["simple_monitor"]["bark_title"] = bark_title_val
+
             updated["auto_order"] = {
                 "enabled": self.auto_order_enabled.get(),
                 "contact": self.auto_order_contact.get().strip(),
